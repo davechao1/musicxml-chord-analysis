@@ -1,0 +1,37 @@
+# ---- Python bytecode / cache ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# ---- Virtual environments ----
+.env/
+.venv/
+env/
+venv/
+
+# ---- macOS & system files ----
+.DS_Store
+.AppleDouble
+.Trashes
+
+# ---- Editor backups ----
+*.swp
+*.swo
+*~
+
+# ---- Logs and temp files ----
+*.log
+*.tmp
+*.bak
+
+# ---- MusicXML / generated data ----
+*.musicxml
+*.mxl
+*.xml
+*.csv
+
+# ---- Build / dist output ----
+build/
+dist/
+*.egg-info/
