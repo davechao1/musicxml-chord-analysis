@@ -101,15 +101,19 @@ def get_rn_rows(path: str):
     p = pathlib.Path(path)
     s = converter.parse(str(p))
 
-    # prefer written key
-    ksigs = list(s.recurse().getElementsByClass(m21key.KeySignature))
-    if ksigs:
-        try:
-            k = ksigs[0].asKey()
-        except Exception:
-            k = s.analyze("key")
+    # prefer written key (use Key objects if present; they preserve <mode>)
+    keys = list(s.recurse().getElementsByClass(m21key.Key))
+    if keys:
+        k = keys[0]  # this is a music21.key.Key with correct .mode (major/minor)
     else:
-        k = s.analyze("key")
+        ksigs = list(s.recurse().getElementsByClass(m21key.KeySignature))
+        if ksigs:
+            try:
+                k = ksigs[0].asKey()
+            except Exception:
+                k = s.analyze("key")
+        else:
+            k = s.analyze("key")
 
     key_name = pretty_key_name(k)
     rows = []
