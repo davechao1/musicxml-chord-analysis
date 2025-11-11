@@ -3,8 +3,7 @@ from music21 import key as m21key
 import re
 
 # ---------- Output preferences ----------
-# Choose how to print major 6/9 chords: "6/9" or "69"
-PRINT_69_STYLE = "69"   # set to "6/9" if you prefer IV6/9
+PRINT_69_STYLE = "69"   # or "6/9" if you prefer IV6/9
 
 # ---------- Literal prettifiers ----------
 
@@ -45,15 +44,9 @@ def prettify_literal(literal: str) -> str:
 # ---------- RN normalization ----------
 
 MAJ7_ALIASES   = re.compile(r"(?:\^7|M7|maj7|Δ7|Δ)", re.I)
-DOM7_PLAIN_RE  = re.compile(r"(?<![øo])7(?![0-9])", re.I)   # plain 7 (not ø7/o7)
+DOM7_PLAIN_RE  = re.compile(r"(?<![øo])7(?![0-9])", re.I)
 
 def normalize_rn(fig: str) -> str:
-    """
-    Normalize a music21 RN figure minimally:
-      - remove spaces
-      - unify maj7 aliases to 'maj7'
-      - uppercase degree token (I..VII), preserve accidental (#/b)
-    """
     t = (fig or "").replace(" ", "")
     t = MAJ7_ALIASES.sub("maj7", t)
     m = re.match(r"^([b#]?)(VII|VI|V|IV|III|II|I|vii|vi|v|iv|iii|ii|i)(.*)$", t)
@@ -84,7 +77,7 @@ def pretty_from_rn_and_literal(rn_fig: str, literal: str) -> str:
       - minor triad → lowercase degree only (Am → iii); minor6 → -6; minor7 → -7
       - dim → o7, half-dim → ø7
       - 6/9-family prints as DEG + PRINT_69_STYLE (IV69 or IV6/9)
-      - plain '7' in literal (e.g., F7, F7/A) → DOM7
+      - plain '7' in literal (e.g., F7, F7/A, D13, D7sus4) → DOM7 and **uppercase degree**
       - strip RN inversion digits (65/64/43/42/32) from RN quality
     """
     if not rn_fig:
@@ -112,8 +105,7 @@ def pretty_from_rn_and_literal(rn_fig: str, literal: str) -> str:
     # minor traits from literal
     # allow digits/slashes right after 'm' (Am, Am6, Am7, Am/C)
     is_min_triad = bool(re.search(r"^[a-g][#b]?m(?=$|[/\s(]|[0-9])", lit_l))
-    is_min7_lit  = (re.search(r"m7\b", lit_l) is not None)
-    is_min7      = is_min7_lit and not (is_maj_fam or is_half or is_dim7)
+    is_min7_lit  = (re.search(r"\bm7\b", lit_l) is not None)
 
     # robust 6/9 (covers 'Bb6 add 9', 'Bb6add9', 'Bb6/9', 'Bb69', etc.)
     has_6_9 = bool(
@@ -125,13 +117,15 @@ def pretty_from_rn_and_literal(rn_fig: str, literal: str) -> str:
     # literal-level plain dominant 7 (not maj7 / m7 / ø7 / o7)
     is_dom7_lit = ("7" in lit_l) and not any(tag in lit_l for tag in ("maj7", "maj", "m7", "ø7", "o7"))
 
-    # If RN shows lowercase degree and RN quality has '7' or literal says m7 → minor7
-    if (not is_min7) and rn_minor_deg and (("7" in qlow) or is_min7_lit):
-        is_min7 = True
+    # Minor-7 if literal says m7 (and not overridden by dim/half/maj family)
+    is_min7 = is_min7_lit and not (is_maj_fam or is_half or is_dim7)
 
-    # decide degree case
-    minorish_literal = is_min7 or is_half or is_dim7 or (("min" in lit_l) and not is_maj_fam) or is_min_triad
-    deg = DEG.lower() if (minorish_literal or rn_minor_deg) else DEG
+    # ----- decide degree case (IMPORTANT: dominants force uppercase) -----
+    if is_dom7_lit:
+        deg = DEG  # uppercase for dominants regardless of RN lowercase
+    else:
+        minorish_literal = is_min7 or is_half or is_dim7 or (("min" in lit_l) and not is_maj_fam) or is_min_triad
+        deg = DEG.lower() if (minorish_literal or rn_minor_deg) else DEG
 
     # ----- Build base token (order matters) -----
     if is_dim7:
@@ -145,17 +139,16 @@ def pretty_from_rn_and_literal(rn_fig: str, literal: str) -> str:
     elif is_min7:
         base = f"{acc}{deg}-7"
     elif has_6_9:
-        if minorish_literal or is_min_triad:
-            # conservative for minor 6/9 in RN (often not encoded distinctly)
-            base = f"{acc}{deg}-6"
+        if deg.islower() or is_min_triad:
+            base = f"{acc}{deg}-6"     # conservative for minor 6/9
         else:
             base = f"{acc}{DEG}{PRINT_69_STYLE}"
     elif has_6_only:
-        base = f"{acc}{deg}-6" if (minorish_literal or is_min_triad) else f"{acc}{DEG}6"
+        base = f"{acc}{deg}-6" if (deg.islower() or is_min_triad) else f"{acc}{DEG}6"
     elif is_dom7_lit:
-        base = f"{acc}{DEG}7"      # treat literal 'F7' / 'F7/A' as DOM7
+        base = f"{acc}{DEG}7"         # treat literal 'D7', 'D13', 'D7sus4' as DOM7
     elif is_min_triad:
-        base = f"{acc}{deg}"       # Am → iii
+        base = f"{acc}{deg}"          # Am → iii
     else:
         # RN fallback when literal doesn’t specify the quality
         if "maj7" in qlow or "maj" in qlow:
@@ -191,16 +184,30 @@ def parse_key_arg(kstr: str) -> m21key.Key:
         raise ValueError(f"Unrecognized key string: {kstr}")
 
 def prefer_written_key(score) -> m21key.Key:
-    """Prefer the first written KeySignature; else fall back to analyze('key')."""
+    """
+    Prefer an explicit Key (with mode) if present; else fall back to
+    KeySignature.asKey(); else analyze('key').
+    """
     try:
-        ksigs = list(score.recurse().getElementsByClass(m21key.KeySignature))
+        # 1) music21.key.Key objects carry explicit mode (major/minor)
+        k_objs = list(score.recurse().getElementsByClass(m21key.Key))
+        if k_objs:
+            return k_objs[0]
     except Exception:
-        ksigs = []
-    if ksigs:
-        try:
-            return ksigs[0].asKey()
-        except Exception:
-            pass
+        pass
+
+    try:
+        # 2) Fall back to first KeySignature
+        ksigs = list(score.recurse().getElementsByClass(m21key.KeySignature))
+        if ksigs:
+            try:
+                return ksigs[0].asKey()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 3) Last resort
     return score.analyze("key")
 
 def pretty_key_name(k: m21key.Key) -> str:
